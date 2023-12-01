@@ -24,9 +24,9 @@ async fn main() {
     map.set_tile(50, 51, map::Tile::Solid);
     map.set_tile(52, 50, map::Tile::Solid);
     map.set_tile(52, 51, map::Tile::Solid);
-    let mut fov = map::Viewshed::new_at(15, 50, 50, &map);
+    let mut fov = map::Viewshed::new_at(35, 50, 50, &map);
     loop {
-        if is_mouse_button_pressed(MouseButton::Left) {
+        if true || is_mouse_button_pressed(MouseButton::Left) {
             let (mx, my) = mouse_position();
             fov.update(mx as i32 / 6, my as i32 / 6, &map);
         }

@@ -111,10 +111,13 @@ impl Viewshed {
         self.offs_y = y - self.radius;
         self.data = vec![false; (self.diameter * self.diameter) as usize];
         self.set_visible(x, y);
-        self.update_quadrant(x, y, map);
+        self.update_quadrant(x, y, 1, 1, map);
+        self.update_quadrant(x, y, -1, 1, map);
+        self.update_quadrant(x, y, 1, -1, map);
+        self.update_quadrant(x, y, -1, -1, map);
     }
 
-    fn update_quadrant(&mut self, x: i32, y: i32, map: &Map) {
+    fn update_quadrant(&mut self, x: i32, y: i32, dx: i32, dy: i32, map: &Map) {
         // x, y is our viewpoint origin
         // c+cx, y+cy is the top-left of the cell under consideration
         // (in our top-left origin co-ordinate system)
@@ -125,6 +128,8 @@ impl Viewshed {
                 if cx <= self.radius && cy <= self.radius {
                     let d2 = cx.pow(2) + cy.pow(2);
                     if (d2 as f32).sqrt().round() as i32 <= self.radius {
+                        let tx = x + cx * dx;
+                        let ty = y + cy * dy;
                         let mut new_views = Vec::new();
                         for v in views.iter_mut() {
                             // if bottom left is above shallow line or top right is below steep line, ignore
@@ -136,18 +141,18 @@ impl Viewshed {
                             }
                             // otherwise, if square does not block vis:
                             // mark as visible if we can see enough of the square depending on P
-                            if !map.get_tile(x + cx, y + cy).blocks_vision() {
+                            if !map.get_tile(tx, ty).blocks_vision() {
                                 // we can see the square unless the "shrunk" bottom left is above the
                                 // shallow line or the "shrunk" top right is below the steep line
                                 if !v.steep.point_below((cx) as f32 + P, (cy + 1) as f32 - P)
                                     && v.shallow.point_below((cx + 1) as f32 - P, (cy) as f32 + P)
                                 {
-                                    self.set_visible(x + cx, y + cy);
+                                    self.set_visible(tx, ty);
                                 }
                                 continue;
                             }
                             // otherwise (square does block vis):
-                            self.set_visible(x + cx, y + cy);
+                            self.set_visible(tx, ty);
                             let bl_below_steep = v.steep.point_below((cx) as f32, (cy + 1) as f32);
                             let tr_above_shallow =
                                 !v.shallow.point_below((cx + 1) as f32, (cy) as f32);
