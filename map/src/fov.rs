@@ -30,6 +30,10 @@ impl Line {
         }
     }
 
+    fn point_above(&self, x: f32, y: f32) -> bool {
+        x * self.normal_x + y * self.normal_y < self.dot
+    }
+
     fn point_below(&self, x: f32, y: f32) -> bool {
         x * self.normal_x + y * self.normal_y > self.dot
     }
@@ -60,9 +64,9 @@ impl View {
     fn add_shallow_bump(&mut self, x: f32, y: f32) {
         self.shallow = Line::new(self.shallow.near_x, self.shallow.near_y, x, y);
         self.shallow_bumps.push((x, y));
-        // maintain the invariant that all previous steep bumps are below the shallow line
+        // maintain the invariant that no previous steep bumps are above the shallow line
         for (bx, by) in &self.steep_bumps {
-            if !self.shallow.point_below(*bx, *by) {
+            if self.shallow.point_above(*bx, *by) {
                 self.shallow = Line::new(*bx, *by, self.shallow.far_x, self.shallow.far_y);
             }
         }
@@ -71,7 +75,7 @@ impl View {
     fn add_steep_bump(&mut self, x: f32, y: f32) {
         self.steep = Line::new(self.steep.near_x, self.steep.near_y, x, y);
         self.steep_bumps.push((x, y));
-        // maintain the invariant that all previous shallow bumps are above the steep line
+        // maintain the invariant that no previous shallow bumps are below the steep line
         for (bx, by) in &self.shallow_bumps {
             if self.steep.point_below(*bx, *by) {
                 self.steep = Line::new(*bx, *by, self.steep.far_x, self.steep.far_y);
@@ -135,7 +139,7 @@ impl Viewshed {
                             // if bottom left is above shallow line or top right is below steep line, ignore
                             //   (if the very corner only is on the line, still ignore)
                             if v.steep.point_below((cx + 1) as f32, (cy) as f32)
-                                || !v.shallow.point_below((cx) as f32, (cy + 1) as f32)
+                                || v.shallow.point_above((cx) as f32, (cy + 1) as f32)
                             {
                                 continue;
                             }
@@ -145,7 +149,7 @@ impl Viewshed {
                                 // we can see the square unless the "shrunk" bottom left is above the
                                 // shallow line or the "shrunk" top right is below the steep line
                                 if !v.steep.point_below((cx) as f32 + P, (cy + 1) as f32 - P)
-                                    && v.shallow.point_below((cx + 1) as f32 - P, (cy) as f32 + P)
+                                    && !v.shallow.point_above((cx + 1) as f32 - P, (cy) as f32 + P)
                                 {
                                     self.set_visible(tx, ty);
                                 }
@@ -155,7 +159,7 @@ impl Viewshed {
                             self.set_visible(tx, ty);
                             let bl_below_steep = v.steep.point_below((cx) as f32, (cy + 1) as f32);
                             let tr_above_shallow =
-                                !v.shallow.point_below((cx + 1) as f32, (cy) as f32);
+                                v.shallow.point_above((cx + 1) as f32, (cy) as f32);
                             if bl_below_steep && tr_above_shallow {
                                 // view is fully blocked
                                 v.alive = false;
