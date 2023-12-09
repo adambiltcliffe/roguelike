@@ -104,6 +104,15 @@ dependencies = [
 name = "game"
 version = "0.1.0"
 dependencies = [
+ "generator",
+ "macroquad",
+ "map",
+]
+
+[[package]]
+name = "generator"
+version = "0.1.0"
+dependencies = [
  "macroquad",
  "map",
 ]

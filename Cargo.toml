@@ -1,5 +1,5 @@
 [workspace]
 
-members = ["game", "map"]
+members = ["game", "generator", "map"]
 
 resolver = "2"

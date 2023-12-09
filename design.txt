@@ -1,0 +1,35 @@
+Key buildings:
+    The manor itself
+        The courtyard
+        The cellars
+        The driveway/front circle
+    The stables/carriage house
+The groundskeeper's cottage
+
+Smaller buildings to place elsewhere:
+    The folly
+    The chapel
+        The crypt
+    The ice-house
+
+
+The lawns
+    The croquet lawn
+The avenue
+The terrace
+The parterre
+The walled garden
+The kitchen garden
+The orchard
+The hedge maze
+The meadow
+The ornamental pond
+The woods
+The lake
+The boathouse
+Outer areas:
+    The road
+    The heath
+    The swamp
+    The cliffs
+    The cave(?)

@@ -1,5 +1,5 @@
 [package]
-name = "game"
+name = "generator"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,6 +7,5 @@ edition = "2021"
 
 [dependencies]
 
-generator = { path = "../generator" }
 map = { path = "../map" }
 macroquad = "0.4.0"
