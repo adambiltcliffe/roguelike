@@ -11,16 +11,16 @@ const BLOCK_CELLS: usize = (BLOCK_SIZE * BLOCK_SIZE) as usize;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Tile {
-    Solid,
-    Empty,
+    Wall,
+    Floor,
     Void,
 }
 
 impl Tile {
     pub fn blocks_vision(&self) -> bool {
         match self {
-            Tile::Solid => true,
-            Tile::Empty => false,
+            Tile::Wall => true,
+            Tile::Floor => false,
             Tile::Void => false,
         }
     }
@@ -70,7 +70,7 @@ impl Map {
             self.bounds.y = self.bounds.y.min(k.1 * BLOCK_SIZE);
             self.bounds.w = (max_x - self.bounds.x).max((k.0 + 1) * BLOCK_SIZE - self.bounds.x);
             self.bounds.h = (max_y - self.bounds.y).max((k.1 + 1) * BLOCK_SIZE - self.bounds.y);
-            [Tile::Solid; BLOCK_CELLS]
+            [Tile::Void; BLOCK_CELLS]
         })[idx] = tile;
     }
 }
