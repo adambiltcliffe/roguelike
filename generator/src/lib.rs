@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use macroquad::rand;
 use map::{Map, Rect, Tile};
 
@@ -15,9 +17,9 @@ pub fn make_world() -> Map {
         walls: Vec::new(),
         corners: Vec::new(),
     };
-    add_room(&mut data, &Rect::new(50, 50, 7, 12));
-    add_room(&mut data, &Rect::new(50, 63, 15, 9));
-    for _ in 0..40 {
+    add_room(&mut data, &Rect::new(50, 50, 7, 10));
+    add_room(&mut data, &Rect::new(50, 61, 10, 7));
+    for _ in 0..100 {
         if data.corners.is_empty() {
             break;
         }
@@ -25,6 +27,10 @@ pub fn make_world() -> Map {
             .corners
             .swap_remove(rand::gen_range(0, data.corners.len()));
         try_corner(&mut data, nc);
+    }
+    let mut conns: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
+    for i in 0..data.rooms.len() {
+        conns.insert(i, HashMap::new());
     }
     for (i1, r1) in data.rooms.iter().enumerate() {
         for (i2, r2) in data.rooms.iter().enumerate() {
@@ -37,6 +43,9 @@ pub fn make_world() -> Map {
                         y: max_top,
                         h: min_bottom - max_top + 1,
                     });
+                    let idx = data.walls.len() - 1;
+                    conns.get_mut(&i1).unwrap().insert(i2, idx);
+                    conns.get_mut(&i2).unwrap().insert(i1, idx);
                 }
             }
 
@@ -49,17 +58,36 @@ pub fn make_world() -> Map {
                         y: r2.y - 1,
                         w: min_right - max_left + 1,
                     });
+                    let idx = data.walls.len() - 1;
+                    conns.get_mut(&i1).unwrap().insert(i2, idx);
+                    conns.get_mut(&i2).unwrap().insert(i1, idx);
                 }
             }
         }
     }
-    for w in data.walls {
-        match w {
-            InternalWall::Vertical { x, y, h } => {
-                data.map.set_tile(x, y + rand::gen_range(0, h), Tile::Floor);
+    let mut closed = HashSet::new();
+    let mut open = Vec::new();
+    closed.insert(0);
+    for (i, _) in conns.get(&0).unwrap() {
+        open.push(i);
+    }
+    while let Some(r) = pop_random(&mut open) {
+        closed.insert(*r);
+        let mut wall_idxs = Vec::new();
+        for (ri, wi) in conns.get(r).unwrap() {
+            if closed.contains(ri) {
+                wall_idxs.push(*wi);
+            } else {
+                if !open.contains(&ri) {
+                    open.push(ri);
+                }
             }
-            InternalWall::Horizontal { x, y, w } => {
-                data.map.set_tile(x + rand::gen_range(0, w), y, Tile::Floor);
+        }
+        // wall_idxs contains the indices into data.walls which could connect this room
+        let force = rand::gen_range(0, wall_idxs.len());
+        for (i, wi) in wall_idxs.iter().enumerate() {
+            if i == force || rand::gen_range(0, 100) < 35 {
+                open_wall(&mut data.map, &data.walls[*wi]);
             }
         }
     }
@@ -90,6 +118,15 @@ impl Corner {
 enum InternalWall {
     Vertical { x: i32, y: i32, h: i32 },
     Horizontal { x: i32, y: i32, w: i32 },
+}
+
+impl InternalWall {
+    fn length(&self) -> i32 {
+        match self {
+            InternalWall::Vertical { h, .. } => *h,
+            InternalWall::Horizontal { w, .. } => *w,
+        }
+    }
 }
 
 fn add_room(data: &mut MapgenData, rect: &Rect) {
@@ -155,8 +192,8 @@ fn add_room(data: &mut MapgenData, rect: &Rect) {
 }
 
 fn bounds_for_corner(c: &Corner) -> Rect {
-    let w = rand::gen_range(5, 15);
-    let h = rand::gen_range(5, 15);
+    let w = rand::gen_range(5, 12);
+    let h = rand::gen_range(5, 12);
     match c.typ {
         CornerType::TopLeft => Rect::new(c.x, c.y, w, h),
         CornerType::TopRight => Rect::new(c.x - w + 1, c.y, w, h),
@@ -175,4 +212,37 @@ fn try_corner(data: &mut MapgenData, corner: Corner) {
         }
     }
     add_room(data, &Rect { x, y, w, h })
+}
+
+fn open_wall(map: &mut Map, w: &InternalWall) {
+    if rand::gen_range(0, 5) == 0 {
+        for i in 0..w.length() {
+            open_tile_in_wall(map, w, i);
+        }
+    } else if w.length() > 3 && rand::gen_range(0, 5) == 0 {
+        let i = rand::gen_range(1, w.length() - 2);
+        open_tile_in_wall(map, w, i);
+        open_tile_in_wall(map, w, i + 1);
+    } else {
+        open_tile_in_wall(map, w, rand::gen_range(0, w.length()));
+    }
+}
+
+fn open_tile_in_wall(map: &mut Map, w: &InternalWall, i: i32) {
+    match w {
+        InternalWall::Vertical { x, y, .. } => {
+            map.set_tile(*x, *y + i, Tile::Floor);
+        }
+        InternalWall::Horizontal { x, y, .. } => {
+            map.set_tile(*x + i, *y, Tile::Floor);
+        }
+    }
+}
+
+fn pop_random<T>(v: &mut Vec<T>) -> Option<T> {
+    if v.is_empty() {
+        return None;
+    }
+    let idx = rand::gen_range(0, v.len());
+    Some(v.swap_remove(idx))
 }
