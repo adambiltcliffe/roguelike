@@ -15,7 +15,7 @@ async fn main() {
             fov.update(mx as i32 / 6, my as i32 / 6, &map);
         }
         render(&map, &fov);
-        generator::mutate_map(&mut map, &im, 20, 100.0);
+        generator::mutate_map(&mut map, &im, 200, 100.0);
         next_frame().await;
     }
 }

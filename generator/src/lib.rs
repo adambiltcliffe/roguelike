@@ -77,21 +77,23 @@ fn calc_chi_sq(weights: &HashMap<Pattern, f64>, freqs: &HashMap<Pattern, u32>) -
 }
 
 pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperature: f64) {
-    for _ in 0..n {
+    let mut freqs: HashMap<Pattern, u32> = HashMap::new();
+    for p in mutator.weights.keys() {
+        freqs.insert(*p, 0);
+    }
+    for y in 0..(SIZE - 2) {
+        for x in 0..(SIZE - 2) {
+            let p = get_pattern_at(map, x, y);
+            *(freqs.entry(p).or_default()) += 1;
+        }
+    }
+    // println!("sum of frequencies is {}", freqs.values().sum::<u32>());
+    for ii in 0..n {
         // VERY heavily unoptimized
-        let mut freqs: HashMap<Pattern, u32> = HashMap::new();
-        for p in mutator.weights.keys() {
-            freqs.insert(*p, 0);
-        }
-        for y in 0..(SIZE - 2) {
-            for x in 0..(SIZE - 2) {
-                let p = get_pattern_at(map, x, y);
-                *(freqs.entry(p).or_default()) += 1;
-            }
-        }
-        println!("sum of frequencies is {}", freqs.values().sum::<u32>());
         let chi_sq = calc_chi_sq(&mutator.weights, &freqs);
-        println!("original value of chi squared is {}", chi_sq);
+        if (ii == 0) {
+            println!("original value of chi squared is {}", chi_sq);
+        }
         let cx = macroquad::rand::gen_range(0, SIZE);
         let cy = macroquad::rand::gen_range(0, SIZE);
         let x_min = (cx - 2).max(0);
@@ -104,11 +106,11 @@ pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperatu
                 *base_freqs.get_mut(&get_pattern_at(map, x, y)).unwrap() -= 1;
             }
         }
-        println!(
+        /*println!(
             "sum of base frequencies is {}",
             base_freqs.values().sum::<u32>()
-        );
-        let mut opts: Vec<(f64, Tile)> = Vec::new();
+        );*/
+        let mut opts: Vec<(f64, Tile, _)> = Vec::new();
         for cand_tile in [Tile::Wall, Tile::Floor] {
             let mut temp_freqs = base_freqs.clone();
             map.set_tile(cx, cy, cand_tile);
@@ -119,19 +121,19 @@ pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperatu
             }
             let new_chi_sq = calc_chi_sq(&mutator.weights, &temp_freqs);
             let p = f64::exp((chi_sq - new_chi_sq) / temperature);
-            println!(
+            /*println!(
             "new value of chi squared with candidate {:?} is {}, relative transition probability={}",
-            cand_tile, new_chi_sq, p
-        );
-            opts.push((p, cand_tile));
+            cand_tile, new_chi_sq, p);*/
+            opts.push((p, cand_tile, temp_freqs));
         }
         let mut r = macroquad::rand::gen_range(0.0, opts.iter().map(|t| t.0).sum());
         while r > opts.last().unwrap().0 {
             r -= opts.last().unwrap().0;
             opts.pop();
         }
-        let new_tile = opts.last().unwrap().1;
+        let (_, new_tile, new_freqs) = opts.pop().unwrap();
         map.set_tile(cx, cy, new_tile);
+        freqs = new_freqs;
     }
 }
 
