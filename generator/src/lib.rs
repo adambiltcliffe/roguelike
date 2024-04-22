@@ -3,246 +3,148 @@ use std::collections::{HashMap, HashSet};
 use macroquad::rand;
 use map::{Map, Rect, Tile};
 
-struct MapgenData {
-    map: Map,
-    rooms: Vec<Rect>,
-    walls: Vec<InternalWall>,
-    corners: Vec<Corner>,
+type Pattern = [Tile; 9];
+
+const SIZE: i32 = 40;
+
+fn get_pattern_at(map: &Map, x: i32, y: i32) -> Pattern {
+    [
+        map.get_tile(x, y),
+        map.get_tile(x + 1, y),
+        map.get_tile(x + 2, y),
+        map.get_tile(x, y + 1),
+        map.get_tile(x + 1, y + 1),
+        map.get_tile(x + 2, y + 1),
+        map.get_tile(x, y + 2),
+        map.get_tile(x + 1, y + 2),
+        map.get_tile(x + 2, y + 2),
+    ]
+}
+
+pub struct InteractiveMutator {
+    weights: HashMap<Pattern, f64>,
+}
+
+pub fn make_mutator() -> InteractiveMutator {
+    use std::fs::File;
+    let decoder = png::Decoder::new(File::open("CaveMaze.png").unwrap());
+    let mut reader = decoder.read_info().unwrap();
+    // Allocate the output buffer.
+    let mut buf = vec![0; reader.output_buffer_size()];
+    // Read the next frame. An APNG might contain multiple frames.
+    let (ct, bd) = reader.output_color_type();
+    let info = reader.next_frame(&mut buf).unwrap();
+    println!("Read the data");
+    println!("Buffer size was {}", buf.len());
+    println!("Colour type and bit depth are {:?}, {:?}", ct, bd);
+    println!("Pixel dimensions are {}x{}", info.width, info.height);
+    println!("Bytes per scanline is {}", info.line_size);
+    println!("{:?}", buf);
+    // note to set: Map is the WRONG data structure to use here in the long term
+    let mut map = Map::new();
+    for y in 0..(info.height as i32) {
+        for x in (0..info.width as i32) {
+            if buf[(3 * (y * info.width as i32 + x)) as usize] == 0 {
+                print!("#");
+                map.set_tile(x, y, Tile::Wall);
+            } else {
+                print!(".");
+                map.set_tile(x, y, Tile::Floor);
+            }
+        }
+        println!();
+    }
+    let mut weights: HashMap<Pattern, f64> = HashMap::new();
+    for y in 0..(info.height as i32 - 2) {
+        for x in (0..info.width as i32 - 2) {
+            let p: Pattern = get_pattern_at(&map, x, y);
+            *weights.entry(p).or_default() += 1.0;
+        }
+    }
+    println!("cataloguing complete, {} patterns observed", weights.len());
+    let wmax = weights.values().max_by(|a, b| a.total_cmp(b)).unwrap();
+    println!("max weight is {}", wmax);
+    InteractiveMutator { weights }
+}
+
+fn calc_chi_sq(weights: &HashMap<Pattern, f64>, freqs: &HashMap<Pattern, u32>) -> f64 {
+    let mut result = 0.0;
+    for (k, v) in freqs.iter() {
+        let exp = weights.get(k).cloned().unwrap_or(0.01);
+        result += (*v as f64 - exp).powf(2.0) / exp;
+    }
+    result
+}
+
+pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperature: f64) {
+    for _ in 0..n {
+        // VERY heavily unoptimized
+        let mut freqs: HashMap<Pattern, u32> = HashMap::new();
+        for p in mutator.weights.keys() {
+            freqs.insert(*p, 0);
+        }
+        for y in 0..(SIZE - 2) {
+            for x in 0..(SIZE - 2) {
+                let p = get_pattern_at(map, x, y);
+                *(freqs.entry(p).or_default()) += 1;
+            }
+        }
+        println!("sum of frequencies is {}", freqs.values().sum::<u32>());
+        let chi_sq = calc_chi_sq(&mutator.weights, &freqs);
+        println!("original value of chi squared is {}", chi_sq);
+        let cx = macroquad::rand::gen_range(0, SIZE);
+        let cy = macroquad::rand::gen_range(0, SIZE);
+        let x_min = (cx - 2).max(0);
+        let x_max = (cx + 2).min(SIZE - 3);
+        let y_min = (cy - 2).max(0);
+        let y_max = (cy + 2).min(SIZE - 3);
+        let mut base_freqs = freqs.clone();
+        for x in x_min..=x_max {
+            for y in y_min..=y_max {
+                *base_freqs.get_mut(&get_pattern_at(map, x, y)).unwrap() -= 1;
+            }
+        }
+        println!(
+            "sum of base frequencies is {}",
+            base_freqs.values().sum::<u32>()
+        );
+        let mut opts: Vec<(f64, Tile)> = Vec::new();
+        for cand_tile in [Tile::Wall, Tile::Floor] {
+            let mut temp_freqs = base_freqs.clone();
+            map.set_tile(cx, cy, cand_tile);
+            for x in x_min..=x_max {
+                for y in y_min..=y_max {
+                    *temp_freqs.entry(get_pattern_at(map, x, y)).or_default() += 1;
+                }
+            }
+            let new_chi_sq = calc_chi_sq(&mutator.weights, &temp_freqs);
+            let p = f64::exp((chi_sq - new_chi_sq) / temperature);
+            println!(
+            "new value of chi squared with candidate {:?} is {}, relative transition probability={}",
+            cand_tile, new_chi_sq, p
+        );
+            opts.push((p, cand_tile));
+        }
+        let mut r = macroquad::rand::gen_range(0.0, opts.iter().map(|t| t.0).sum());
+        while r > opts.last().unwrap().0 {
+            r -= opts.last().unwrap().0;
+            opts.pop();
+        }
+        let new_tile = opts.last().unwrap().1;
+        map.set_tile(cx, cy, new_tile);
+    }
 }
 
 pub fn make_world() -> Map {
-    let mut data = MapgenData {
-        map: Map::new(),
-        rooms: Vec::new(),
-        walls: Vec::new(),
-        corners: Vec::new(),
-    };
-    add_room(&mut data, &Rect::new(50, 50, 7, 10));
-    add_room(&mut data, &Rect::new(50, 61, 10, 7));
-    for _ in 0..100 {
-        if data.corners.is_empty() {
-            break;
-        }
-        let nc = data
-            .corners
-            .swap_remove(rand::gen_range(0, data.corners.len()));
-        try_corner(&mut data, nc);
-    }
-    let mut conns: HashMap<usize, HashMap<usize, usize>> = HashMap::new();
-    for i in 0..data.rooms.len() {
-        conns.insert(i, HashMap::new());
-    }
-    for (i1, r1) in data.rooms.iter().enumerate() {
-        for (i2, r2) in data.rooms.iter().enumerate() {
-            if r1.x + r1.w + 1 == r2.x {
-                let max_top = r1.y.max(r2.y);
-                let min_bottom = (r1.y + r1.h - 1).min(r2.y + r2.h - 1);
-                if max_top <= min_bottom {
-                    data.walls.push(InternalWall::Vertical {
-                        x: r2.x - 1,
-                        y: max_top,
-                        h: min_bottom - max_top + 1,
-                    });
-                    let idx = data.walls.len() - 1;
-                    conns.get_mut(&i1).unwrap().insert(i2, idx);
-                    conns.get_mut(&i2).unwrap().insert(i1, idx);
-                }
-            }
-
-            if r1.y + r1.h + 1 == r2.y {
-                let max_left = r1.x.max(r2.x);
-                let min_right = (r1.x + r1.w - 1).min(r2.x + r2.w - 1);
-                if max_left <= min_right {
-                    data.walls.push(InternalWall::Horizontal {
-                        x: max_left,
-                        y: r2.y - 1,
-                        w: min_right - max_left + 1,
-                    });
-                    let idx = data.walls.len() - 1;
-                    conns.get_mut(&i1).unwrap().insert(i2, idx);
-                    conns.get_mut(&i2).unwrap().insert(i1, idx);
-                }
-            }
-        }
-    }
-    let mut closed = HashSet::new();
-    let mut open = Vec::new();
-    closed.insert(0);
-    for (i, _) in conns.get(&0).unwrap() {
-        open.push(i);
-    }
-    while let Some(r) = pop_random(&mut open) {
-        closed.insert(*r);
-        let mut wall_idxs = Vec::new();
-        for (ri, wi) in conns.get(r).unwrap() {
-            if closed.contains(ri) {
-                wall_idxs.push(*wi);
+    let mut map = Map::new();
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            if macroquad::rand::rand() % 2 == 0 {
+                map.set_tile(x, y, Tile::Floor)
             } else {
-                if !open.contains(&ri) {
-                    open.push(ri);
-                }
-            }
-        }
-        // wall_idxs contains the indices into data.walls which could connect this room
-        let force = rand::gen_range(0, wall_idxs.len());
-        for (i, wi) in wall_idxs.iter().enumerate() {
-            if i == force || rand::gen_range(0, 100) < 35 {
-                open_wall(&mut data.map, &data.walls[*wi]);
+                map.set_tile(x, y, Tile::Wall)
             }
         }
     }
-    data.map
-}
-
-#[derive(Debug)]
-enum CornerType {
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-}
-
-#[derive(Debug)]
-struct Corner {
-    x: i32,
-    y: i32,
-    typ: CornerType,
-}
-
-impl Corner {
-    fn new(x: i32, y: i32, typ: CornerType) -> Self {
-        Self { x, y, typ }
-    }
-}
-
-enum InternalWall {
-    Vertical { x: i32, y: i32, h: i32 },
-    Horizontal { x: i32, y: i32, w: i32 },
-}
-
-impl InternalWall {
-    fn length(&self) -> i32 {
-        match self {
-            InternalWall::Vertical { h, .. } => *h,
-            InternalWall::Horizontal { w, .. } => *w,
-        }
-    }
-}
-
-fn add_room(data: &mut MapgenData, rect: &Rect) {
-    data.rooms.push(rect.clone());
-    let Rect { x, y, w, h } = *rect;
-    for cx in x..(x + w) {
-        for cy in y..(y + h) {
-            data.map.set_tile(cx, cy, Tile::Floor);
-        }
-    }
-    data.map.set_tile(x - 1, y - 1, Tile::Wall);
-    data.map.set_tile(x - 1, y + h, Tile::Wall);
-    data.map.set_tile(x + w, y - 1, Tile::Wall);
-    data.map.set_tile(x + w, y + h, Tile::Wall);
-    for cx in x..(x + w) {
-        data.map.set_tile(cx, y - 1, Tile::Wall);
-        data.map.set_tile(cx, y + h, Tile::Wall);
-        if data.map.get_tile(cx, y - 2) == Tile::Void {
-            if data.map.get_tile(cx - 1, y - 2) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(cx, y - 2, CornerType::BottomLeft));
-            }
-            if data.map.get_tile(cx + 1, y - 2) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(cx, y - 2, CornerType::BottomRight));
-            }
-        }
-        if data.map.get_tile(cx, y + h + 1) == Tile::Void {
-            if data.map.get_tile(cx - 1, y + h + 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(cx, y + h + 1, CornerType::TopLeft));
-            }
-            if data.map.get_tile(cx + 1, y + h + 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(cx, y + h + 1, CornerType::TopRight));
-            }
-        }
-    }
-    for cy in y..(y + h) {
-        data.map.set_tile(x - 1, cy, Tile::Wall);
-        data.map.set_tile(x + w, cy, Tile::Wall);
-        if data.map.get_tile(x - 2, cy) == Tile::Void {
-            if data.map.get_tile(x - 2, cy - 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(x - 2, cy, CornerType::TopRight));
-            }
-            if data.map.get_tile(x - 2, cy + 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(x - 2, cy, CornerType::BottomRight));
-            }
-        }
-        if data.map.get_tile(x + w + 1, cy) == Tile::Void {
-            if data.map.get_tile(x + w + 1, cy - 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(x + w + 1, cy, CornerType::TopLeft));
-            }
-            if data.map.get_tile(x + w + 1, cy + 1) == Tile::Wall {
-                data.corners
-                    .push(Corner::new(x + w + 1, cy, CornerType::BottomLeft));
-            }
-        }
-    }
-}
-
-fn bounds_for_corner(c: &Corner) -> Rect {
-    let w = rand::gen_range(5, 12);
-    let h = rand::gen_range(5, 12);
-    match c.typ {
-        CornerType::TopLeft => Rect::new(c.x, c.y, w, h),
-        CornerType::TopRight => Rect::new(c.x - w + 1, c.y, w, h),
-        CornerType::BottomLeft => Rect::new(c.x, c.y - h + 1, w, h),
-        CornerType::BottomRight => Rect::new(c.x - w + 1, c.y - h + 1, w, h),
-    }
-}
-
-fn try_corner(data: &mut MapgenData, corner: Corner) {
-    let Rect { x, y, w, h } = bounds_for_corner(&corner);
-    for cx in x..(x + w) {
-        for cy in y..(y + h) {
-            if data.map.get_tile(cx, cy) != Tile::Void {
-                return;
-            }
-        }
-    }
-    add_room(data, &Rect { x, y, w, h })
-}
-
-fn open_wall(map: &mut Map, w: &InternalWall) {
-    if rand::gen_range(0, 5) == 0 {
-        for i in 0..w.length() {
-            open_tile_in_wall(map, w, i);
-        }
-    } else if w.length() > 3 && rand::gen_range(0, 5) == 0 {
-        let i = rand::gen_range(1, w.length() - 2);
-        open_tile_in_wall(map, w, i);
-        open_tile_in_wall(map, w, i + 1);
-    } else {
-        open_tile_in_wall(map, w, rand::gen_range(0, w.length()));
-    }
-}
-
-fn open_tile_in_wall(map: &mut Map, w: &InternalWall, i: i32) {
-    match w {
-        InternalWall::Vertical { x, y, .. } => {
-            map.set_tile(*x, *y + i, Tile::Floor);
-        }
-        InternalWall::Horizontal { x, y, .. } => {
-            map.set_tile(*x + i, *y, Tile::Floor);
-        }
-    }
-}
-
-fn pop_random<T>(v: &mut Vec<T>) -> Option<T> {
-    if v.is_empty() {
-        return None;
-    }
-    let idx = rand::gen_range(0, v.len());
-    Some(v.swap_remove(idx))
+    map
 }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const BLOCK_SIZE: i32 = 8;
 const BLOCK_CELLS: usize = (BLOCK_SIZE * BLOCK_SIZE) as usize;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Tile {
     Wall,
     Floor,
