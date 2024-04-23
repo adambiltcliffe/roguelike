@@ -13,6 +13,7 @@ const BLOCK_CELLS: usize = (BLOCK_SIZE * BLOCK_SIZE) as usize;
 pub enum Tile {
     Wall,
     Floor,
+    Water,
     Void,
 }
 
@@ -21,6 +22,7 @@ impl Tile {
         match self {
             Tile::Wall => true,
             Tile::Floor => false,
+            Tile::Water => false,
             Tile::Void => false,
         }
     }

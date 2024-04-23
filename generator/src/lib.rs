@@ -27,7 +27,7 @@ pub struct InteractiveMutator {
 
 pub fn make_mutator() -> InteractiveMutator {
     use std::fs::File;
-    let decoder = png::Decoder::new(File::open("CaveMaze.png").unwrap());
+    let decoder = png::Decoder::new(File::open("River.png").unwrap());
     let mut reader = decoder.read_info().unwrap();
     // Allocate the output buffer.
     let mut buf = vec![0; reader.output_buffer_size()];
@@ -141,8 +141,11 @@ pub fn make_world() -> Map {
     let mut map = Map::new();
     for y in 0..SIZE {
         for x in 0..SIZE {
-            if macroquad::rand::rand() % 2 == 0 {
+            let r = macroquad::rand::rand();
+            if r % 3 == 0 {
                 map.set_tile(x, y, Tile::Floor)
+            //} else if r % 3 == 1 {
+            //    map.set_tile(x, y, Tile::Water)
             } else {
                 map.set_tile(x, y, Tile::Wall)
             }
