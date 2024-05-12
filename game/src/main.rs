@@ -8,13 +8,16 @@ async fn main() {
     let mut map = generator::make_world();
     let im = generator::make_mutator();
     let mut fov = map::Viewshed::new_at(35, 50, 50, &map);
+    let mut temperature = 100.0;
     loop {
         if true || is_mouse_button_pressed(MouseButton::Left) {
             let (mx, my) = mouse_position();
             fov.update(mx as i32 / 6, my as i32 / 6, &map);
         }
         render(&map, &fov);
-        generator::mutate_map(&mut map, &im, 100, 100.0);
+        generator::mutate_map(&mut map, &im, 100, temperature);
+        temperature *= 0.9995;
+        println!("temperature is {}", temperature);
         next_frame().await;
     }
 }

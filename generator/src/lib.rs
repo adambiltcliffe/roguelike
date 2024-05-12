@@ -23,11 +23,13 @@ fn get_pattern_at(map: &Map, x: i32, y: i32) -> Pattern {
 
 pub struct InteractiveMutator {
     weights: HashMap<Pattern, f64>,
+    k_max: Pattern,
+    w_max: f64,
 }
 
 pub fn make_mutator() -> InteractiveMutator {
     use std::fs::File;
-    let decoder = png::Decoder::new(File::open("River.png").unwrap());
+    let decoder = png::Decoder::new(File::open("CaveMaze.png").unwrap());
     let mut reader = decoder.read_info().unwrap();
     // Allocate the output buffer.
     let mut buf = vec![0; reader.output_buffer_size()];
@@ -62,12 +64,21 @@ pub fn make_mutator() -> InteractiveMutator {
         }
     }
     println!("cataloguing complete, {} patterns observed", weights.len());
-    let wmax = weights.values().max_by(|a, b| a.total_cmp(b)).unwrap();
-    println!("max weight is {}", wmax);
-    InteractiveMutator { weights }
+    let f = ((SIZE * SIZE) as f64) / ((info.width * info.height) as f64);
+    println!("adjustment factor is {}", f);
+    for v in weights.values_mut() {
+        *v *= f;
+    }
+    let (&k_max, &w_max) = weights.iter().max_by(|a, b| a.1.total_cmp(b.1)).unwrap();
+    println!("max weight is {}, key is {:?}", w_max, k_max);
+    InteractiveMutator {
+        weights,
+        w_max,
+        k_max,
+    }
 }
 
-fn calc_chi_sq(weights: &HashMap<Pattern, f64>, freqs: &HashMap<Pattern, u32>) -> f64 {
+fn calc_chi_sq(weights: &HashMap<Pattern, f64>, freqs: &HashMap<Pattern, i32>) -> f64 {
     let mut result = 0.0;
     for (k, v) in freqs.iter() {
         let exp = weights.get(k).cloned().unwrap_or(0.01);
@@ -76,8 +87,24 @@ fn calc_chi_sq(weights: &HashMap<Pattern, f64>, freqs: &HashMap<Pattern, u32>) -
     result
 }
 
+fn update_chi_sq(
+    weights: &HashMap<Pattern, f64>,
+    freqs: &HashMap<Pattern, i32>,
+    d_freqs: &HashMap<Pattern, i32>,
+    old_chi_sq: f64,
+) -> f64 {
+    let mut result = old_chi_sq;
+    for (k, dv) in d_freqs {
+        let v = freqs.get(k).cloned().unwrap_or_default();
+        let exp = weights.get(k).cloned().unwrap_or(0.01);
+        result -= (v as f64 - exp).powf(2.0) / exp;
+        result += ((v + dv) as f64 - exp).powf(2.0) / exp;
+    }
+    result
+}
+
 pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperature: f64) {
-    let mut freqs: HashMap<Pattern, u32> = HashMap::new();
+    let mut freqs: HashMap<Pattern, i32> = HashMap::new();
     for p in mutator.weights.keys() {
         freqs.insert(*p, 0);
     }
@@ -87,65 +114,63 @@ pub fn mutate_map(map: &mut Map, mutator: &InteractiveMutator, n: u32, temperatu
             *(freqs.entry(p).or_default()) += 1;
         }
     }
-    // println!("sum of frequencies is {}", freqs.values().sum::<u32>());
-    for ii in 0..n {
+    let mut chi_sq = calc_chi_sq(&mutator.weights, &freqs);
+    println!("chi squared at start: {}", chi_sq);
+    for _ in 0..n {
         // VERY heavily unoptimized
-        let chi_sq = calc_chi_sq(&mutator.weights, &freqs);
-        if (ii == 0) {
-            println!("original value of chi squared is {}", chi_sq);
-        }
         let cx = macroquad::rand::gen_range(0, SIZE);
         let cy = macroquad::rand::gen_range(0, SIZE);
         let x_min = (cx - 2).max(0);
         let x_max = (cx + 2).min(SIZE - 3);
         let y_min = (cy - 2).max(0);
         let y_max = (cy + 2).min(SIZE - 3);
-        let mut base_freqs = freqs.clone();
+        let mut d_freqs: HashMap<Pattern, i32> = HashMap::new();
         for x in x_min..=x_max {
             for y in y_min..=y_max {
-                *base_freqs.get_mut(&get_pattern_at(map, x, y)).unwrap() -= 1;
+                *d_freqs.entry(get_pattern_at(map, x, y)).or_default() -= 1;
             }
         }
-        /*println!(
-            "sum of base frequencies is {}",
-            base_freqs.values().sum::<u32>()
-        );*/
-        let mut opts: Vec<(f64, Tile, _)> = Vec::new();
+        let mut opts: Vec<(f64, Tile, f64, _)> = Vec::new();
         for cand_tile in [Tile::Wall, Tile::Floor] {
-            let mut temp_freqs = base_freqs.clone();
+            let mut temp_d_freqs = d_freqs.clone();
             map.set_tile(cx, cy, cand_tile);
             for x in x_min..=x_max {
                 for y in y_min..=y_max {
-                    *temp_freqs.entry(get_pattern_at(map, x, y)).or_default() += 1;
+                    *temp_d_freqs.entry(get_pattern_at(map, x, y)).or_default() += 1;
                 }
             }
-            let new_chi_sq = calc_chi_sq(&mutator.weights, &temp_freqs);
+            let new_chi_sq = update_chi_sq(&mutator.weights, &freqs, &temp_d_freqs, chi_sq);
             let p = f64::exp((chi_sq - new_chi_sq) / temperature);
-            /*println!(
-            "new value of chi squared with candidate {:?} is {}, relative transition probability={}",
-            cand_tile, new_chi_sq, p);*/
-            opts.push((p, cand_tile, temp_freqs));
+            opts.push((p, cand_tile, new_chi_sq, temp_d_freqs));
         }
         let mut r = macroquad::rand::gen_range(0.0, opts.iter().map(|t| t.0).sum());
         while r > opts.last().unwrap().0 {
             r -= opts.last().unwrap().0;
             opts.pop();
         }
-        let (_, new_tile, new_freqs) = opts.pop().unwrap();
+        let (_, new_tile, new_chi_sq, new_freqs) = opts.pop().unwrap();
         map.set_tile(cx, cy, new_tile);
-        freqs = new_freqs;
+        for (k, v) in new_freqs {
+            *(freqs.entry(k).or_default()) += v;
+        }
+        chi_sq = new_chi_sq;
     }
+    println!("chi squared at end: {}", chi_sq);
+    println!(
+        "freq for max-weighted pattern is {}, target is {}",
+        freqs[&mutator.k_max], mutator.w_max
+    )
 }
 
 pub fn make_world() -> Map {
     let mut map = Map::new();
     for y in 0..SIZE {
         for x in 0..SIZE {
-            let r = macroquad::rand::rand();
+            let r = 0; //macroquad::rand::rand();
             if r % 3 == 0 {
                 map.set_tile(x, y, Tile::Floor)
-            //} else if r % 3 == 1 {
-            //    map.set_tile(x, y, Tile::Water)
+            } else if r % 3 == 1 {
+                map.set_tile(x, y, Tile::Water)
             } else {
                 map.set_tile(x, y, Tile::Wall)
             }
